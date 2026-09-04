@@ -1,0 +1,21 @@
+[project]
+name = "prog-goats-bot"
+version = "0.1.0"
+description = "Development env for Prog Goats Discord server bot"
+authors = [
+    {name = "Florian-Heringa",email = "florianheringa@gmail.com"}
+]
+requires-python = ">=3.13, <3.15"
+dependencies = [
+    "py-cord (>=2.8.1,<3.0.0)",
+    "python-dotenv (>=1.2.3,<2.0.0)",
+    "aiosqlite (>=0.22.1,<0.23.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false
