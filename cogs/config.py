@@ -18,6 +18,7 @@ class PG_Config(commands.Cog):
     @config.command(name="set-welcome-channel")
     # Whatever 'discord.Permissions' has as kwargs
     @discord.default_permissions(manage_channels=True)
+    @commands.is_owner()
     async def set_welcome_channel(self, ctx: discord.ApplicationContext):
         if ctx.channel:
             await self.bot.db.set_config_value("WELCOME_CHANNEL", str(ctx.channel.id))
@@ -34,6 +35,7 @@ class PG_Config(commands.Cog):
 
     @config.command(name="set-new-member-role")
     @discord.option("new_member_role", type=discord.SlashCommandOptionType.string)
+    @commands.is_owner()
     async def set_new_member_role_id(self, ctx: discord.ApplicationContext, new_member_role: str):
 
         if ctx.guild is None:
@@ -54,6 +56,7 @@ class PG_Config(commands.Cog):
 
     @config.command(name="set-new-member-role-timeout")
     @discord.option("timeout", type=int)
+    @commands.is_owner()
     async def set_new_member_role_timeout(self, ctx: discord.ApplicationContext, timeout: int):
         await self.bot.db.set_config_value("NEW_MEMBER_ROLE_DURATION", str(timeout))
         await ctx.respond(f"Timeout for new member role set to {self.bot.db.get_config_value("NEW_MEMBER_ROLE_DURATION")} seconds.")
