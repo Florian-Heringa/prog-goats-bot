@@ -28,7 +28,7 @@ class PG_Config(commands.Cog):
             if current_welcome_channel_id:
                 current_welcome_channel = ctx.guild.get_channel(int(current_welcome_channel_id))
         
-                await ctx.respond(f"Updated welcome channel, the welcome channel is now {current_welcome_channel}")
+                await ctx.respond(f"Updated welcome channel, the welcome channel is now {current_welcome_channel}", ephemeral=True)
                 return
 
         await ctx.respond(f"Failed to update welcome channel.", ephemeral=True)
