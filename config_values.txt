@@ -1,0 +1,7 @@
+Initial value set via interface commands in server:
+WELCOME_CHANNEL # call /set-welcome-channel in desired channel
+NEW_MEMBER_ROLE_ID # copy role id and pass as argument
+
+Initial Value set by default:
+NEW_MEMBER_ROLE_DURATION = 7 * 24 * 60 * 60 # 1 week in seconds
+GUILD_ID = 708749383918944349
