@@ -31,7 +31,7 @@ class PG_Config(commands.Cog):
                 await ctx.respond(f"Updated welcome channel, the welcome channel is now {current_welcome_channel}")
                 return
 
-        await ctx.respond(f"Failed to update welcome channel.")
+        await ctx.respond(f"Failed to update welcome channel.", ephemeral=True)
 
     @config.command(name="set-new-member-role")
     @discord.option("new_member_role", type=discord.SlashCommandOptionType.string)
@@ -50,16 +50,16 @@ class PG_Config(commands.Cog):
         await self.bot.db.set_config_value("NEW_MEMBER_ROLE_ID", str(role.id))
 
         if role := ctx.guild.get_role(int(self.bot.db.get_config_value("NEW_MEMBER_ROLE_ID"))): # type: ignore
-            await ctx.respond(f"Set new member role to {role}")
+            await ctx.respond(f"Set new member role to {role}", ephemeral=True)
         else:
-            await ctx.respond("Failed to set new member role")
+            await ctx.respond("Failed to set new member role", ephemeral=True)
 
     @config.command(name="set-new-member-role-timeout")
     @discord.option("timeout", type=int)
     @commands.is_owner()
     async def set_new_member_role_timeout(self, ctx: discord.ApplicationContext, timeout: int):
         await self.bot.db.set_config_value("NEW_MEMBER_ROLE_DURATION", str(timeout))
-        await ctx.respond(f"Timeout for new member role set to {self.bot.db.get_config_value("NEW_MEMBER_ROLE_DURATION")} seconds.")
+        await ctx.respond(f"Timeout for new member role set to {self.bot.db.get_config_value("NEW_MEMBER_ROLE_DURATION")} seconds.", ephemeral=True)
 
 def setup(bot):
     bot.add_cog(PG_Config(bot))
