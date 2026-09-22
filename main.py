@@ -39,7 +39,8 @@ class PG_Bot(discord.Bot):
 
 bot = PG_Bot(
     intents = discord.Intents.all(),
-    debug_guilds = [debug_guild]
+    debug_guilds = [debug_guild],
+    owner_id=703546553125568545
 )
 bot.db = PG_database()
 bot.run(bot_token)
