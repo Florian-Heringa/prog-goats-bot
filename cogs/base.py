@@ -30,6 +30,7 @@ class PG_Base(commands.Cog):
 
     # TEST COMMAND
     @discord.slash_command(name="hello", description="Say hello to the bot")
+    @commands.is_owner()
     async def hello(self, ctx: discord.ApplicationContext):
         await ctx.respond("Hey, a variation!")
 
