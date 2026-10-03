@@ -16,6 +16,14 @@ TIME_PATTERN = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 MAX_REMINDERS = 25          # Maximum amount of options in a select menu
 MISSED_GRACE_SECONDS = 3600 # Reminders overdue by more than this (e.g. bot was offline) are skipped
 TIMEZONES = sorted(available_timezones())
+REMINDER_CHANNEL_TYPES = [
+    discord.ChannelType.text,
+    discord.ChannelType.news,
+    discord.ChannelType.public_thread,
+    discord.ChannelType.private_thread,
+]
+# Only user mentions ping, so nobody can use the bot to ping @everyone or roles they couldn't ping themselves
+REMINDER_MENTIONS = discord.AllowedMentions(everyone=False, roles=False, users=True)
 
 #================================================================================
 # Helpers
@@ -48,9 +56,21 @@ def compute_next_run(weekday: int, time_of_day: str, timezone: str, after: float
         candidate += timedelta(days=7)
     return candidate.timestamp()
 
+def check_can_post(channel: discord.TextChannel | discord.Thread, member: discord.Member) -> str | None:
+    """Returns why the member or the bot can't post in the channel, or None when both can"""
+    for who, name in ((member, "You"), (channel.guild.me, "The bot")):
+        perms = channel.permissions_for(who)
+        can_send = perms.send_messages_in_threads if isinstance(channel, discord.Thread) else perms.send_messages
+        if not (perms.view_channel and can_send):
+            return f"{name} can't post in {channel.mention}."
+    return None
+
+def describe_destination(channel_id: int | None) -> str:
+    return f"<#{channel_id}>" if channel_id else "your DMs"
+
 def describe_reminder(reminder: Reminder) -> str:
     return (
-        f"**{DAYS[reminder.weekday].capitalize()} {reminder.time_of_day}**\n"
+        f"**{DAYS[reminder.weekday].capitalize()} {reminder.time_of_day}** in {describe_destination(reminder.channel_id)}\n"
         f"{reminder.text}\n"
         f"-# Next reminder: <t:{int(reminder.next_run)}:F>"
     )
@@ -62,31 +82,57 @@ async def timezone_autocomplete(ctx: discord.AutocompleteContext) -> list[str]:
 #================================================================================
 # Edit UI
 
-class ReminderModal(discord.ui.Modal):
+class ReminderModal(discord.ui.DesignerModal):
+    """DesignerModal instead of Modal, because only those can hold a select menu (the channel picker)"""
 
     def __init__(self, view: "ReminderEditView", reminder: Reminder):
+        self.time_input = discord.ui.InputText(value=reminder.time_of_day, max_length=5)
+        self.day_input = discord.ui.InputText(value=DAYS[reminder.weekday], max_length=9)
+        self.text_input = discord.ui.InputText(value=reminder.text, style=discord.InputTextStyle.long, max_length=1000)
+        self.channel_select = discord.ui.Select(
+            select_type=discord.ComponentType.channel_select,
+            channel_types=REMINDER_CHANNEL_TYPES,
+            required=False,
+            min_values=0,
+            placeholder="Your DMs",
+            default_values=[
+                discord.SelectDefaultValue(id=reminder.channel_id, type=discord.SelectDefaultValueType.channel)
+            ] if reminder.channel_id else None,
+        )
         super().__init__(
-            discord.ui.InputText(label="Time (24-hour HH:MM)", value=reminder.time_of_day, max_length=5),
-            discord.ui.InputText(label="Day", value=DAYS[reminder.weekday], max_length=9),
-            discord.ui.InputText(label="Text", value=reminder.text, style=discord.InputTextStyle.long, max_length=1000),
+            discord.ui.Label("Time (24-hour HH:MM)", self.time_input),
+            discord.ui.Label("Day", self.day_input),
+            discord.ui.Label("Text", self.text_input),
+            discord.ui.Label("Channel", self.channel_select, description="Leave empty to get the reminder in your DMs"),
             title="Edit reminder",
         )
         self.edit_view = view
         self.reminder = reminder
 
     async def callback(self, interaction: discord.Interaction):
-        time_input, day_input, text_input = (child.value or "" for child in self.children)
-
-        time_of_day = parse_time(time_input)
-        weekday = parse_day(day_input)
-        if time_of_day is None or weekday is None or not text_input.strip():
+        time_of_day = parse_time(self.time_input.value or "")
+        weekday = parse_day(self.day_input.value or "")
+        text = (self.text_input.value or "").strip()
+        if time_of_day is None or weekday is None or not text:
             await interaction.response.send_message(
                 "Invalid input, use a 24-hour time like `20:00`, a day like `tuesday`, and a non-empty text.",
                 ephemeral=True
             )
             return
 
-        await self.edit_view.cog.save_reminder(self.edit_view.user_id, self.reminder.id, weekday, time_of_day, text_input.strip())
+        channel_id = None
+        selected = self.channel_select.values or []
+        if selected:
+            channel = await self.edit_view.cog.resolve_channel(selected[0].id)
+            if channel is None or not isinstance(interaction.user, discord.Member):
+                await interaction.response.send_message("Can't use that channel for reminders.", ephemeral=True)
+                return
+            if problem := check_can_post(channel, interaction.user):
+                await interaction.response.send_message(problem, ephemeral=True)
+                return
+            channel_id = channel.id
+
+        await self.edit_view.cog.save_reminder(self.edit_view.user_id, self.reminder.id, weekday, time_of_day, text, channel_id)
         updated = await self.edit_view.cog.bot.db.get_reminder(self.edit_view.user_id, self.reminder.id)
 
         # The modal was opened from the edit message, so the response can update that message in place
@@ -173,13 +219,13 @@ class ReminderEditView(discord.ui.View):
 
 class PG_Reminders(commands.Cog):
     """
-    Weekly DM reminders, e.g. for the people posting the QOTW and SOTW
+    Weekly reminders by DM or in a channel, e.g. for the people posting the QOTW and SOTW
     """
 
     # Hidden by default, enable per user or role in Server Settings -> Integrations
     reminder = discord.SlashCommandGroup(
         "reminder",
-        "Weekly DM reminders",
+        "Weekly reminders",
         default_member_permissions=discord.Permissions(administrator=True),
     )
 
@@ -190,10 +236,29 @@ class PG_Reminders(commands.Cog):
     def cog_unload(self):
         self.send_due_reminders.cancel()
 
-    async def save_reminder(self, user_id: int, reminder_id: int, weekday: int, time_of_day: str, text: str):
+    async def save_reminder(self, user_id: int, reminder_id: int, weekday: int, time_of_day: str, text: str, channel_id: int | None):
         timezone = await self.bot.db.get_user_timezone(user_id) or "UTC"
         next_run = compute_next_run(weekday, time_of_day, timezone, discord.utils.utcnow().timestamp())
-        await self.bot.db.update_reminder(user_id, reminder_id, weekday, time_of_day, text, next_run)
+        await self.bot.db.update_reminder(user_id, reminder_id, weekday, time_of_day, text, next_run, channel_id)
+
+    async def resolve_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        """Cached channel when possible, otherwise fetched (archived threads aren't cached)"""
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden):
+                return None
+        return channel if isinstance(channel, (discord.TextChannel, discord.Thread)) else None
+
+    async def get_member(self, guild: discord.Guild, user_id: int) -> discord.Member | None:
+        member = guild.get_member(user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(user_id)
+            except (discord.NotFound, discord.Forbidden):
+                return None
+        return member
 
     @reminder.command(name="timezone", description="Set your timezone, used for all your reminders")
     @discord.option("timezone", type=str, description="Start typing to search for your timezone, for example: Europe/Amsterdam", autocomplete=timezone_autocomplete)
@@ -211,11 +276,19 @@ class PG_Reminders(commands.Cog):
 
         await ctx.respond(f"Your timezone is now `{timezone}`.", ephemeral=True)
 
-    @reminder.command(name="set", description="Get a weekly DM reminder")
+    @reminder.command(name="set", description="Get a weekly reminder by DM or in a channel")
     @discord.option("time", type=str, description="24-hour time in your timezone, for example 20:00")
     @discord.option("day", type=str, choices=[discord.OptionChoice(name=d.capitalize(), value=d) for d in DAYS])
     @discord.option("text", type=str, description="What the reminder should say", max_length=1000)
-    async def set_reminder(self, ctx: discord.ApplicationContext, time: str, day: str, text: str):
+    @discord.option(
+        "channel",
+        type=discord.SlashCommandOptionType.channel,
+        channel_types=REMINDER_CHANNEL_TYPES,
+        description="Channel to post the reminder in, leave empty to get it in your DMs",
+        required=False,
+        default=None,
+    )
+    async def set_reminder(self, ctx: discord.ApplicationContext, time: str, day: str, text: str, channel: discord.abc.GuildChannel | None):
         timezone = await self.bot.db.get_user_timezone(ctx.author.id)
         if timezone is None:
             await ctx.respond("Set your timezone first with `/reminder timezone`.", ephemeral=True)
@@ -230,14 +303,26 @@ class PG_Reminders(commands.Cog):
             await ctx.respond(f"You can have at most {MAX_REMINDERS} reminders, remove one with `/reminder edit` first.", ephemeral=True)
             return
 
+        channel_id = None
+        if channel is not None:
+            # Re-resolve, so the permission check uses the full channel (with overwrites) instead of the option data
+            target = await self.resolve_channel(channel.id)
+            if target is None or not isinstance(ctx.author, discord.Member):
+                await ctx.respond("Can't use that channel for reminders.", ephemeral=True)
+                return
+            if problem := check_can_post(target, ctx.author):
+                await ctx.respond(problem, ephemeral=True)
+                return
+            channel_id = target.id
+
         weekday = DAYS.index(day)
         next_run = compute_next_run(weekday, time_of_day, timezone, discord.utils.utcnow().timestamp())
-        await self.bot.db.add_reminder(ctx.author.id, weekday, time_of_day, text, next_run)
+        await self.bot.db.add_reminder(ctx.author.id, weekday, time_of_day, text, next_run, channel_id)
 
         await ctx.respond(
-            f"Reminder set for every **{day.capitalize()} at {time_of_day}** ({timezone}).\n"
-            f"First reminder: <t:{int(next_run)}:F>\n"
-            f"-# Make sure you allow DMs from server members, otherwise the bot can't reach you.",
+            f"Reminder set for every **{day.capitalize()} at {time_of_day}** ({timezone}) in {describe_destination(channel_id)}.\n"
+            f"First reminder: <t:{int(next_run)}:F>"
+            + ("" if channel_id else "\n-# Make sure you allow DMs from server members, otherwise the bot can't reach you."),
             ephemeral=True
         )
 
@@ -260,8 +345,7 @@ class PG_Reminders(commands.Cog):
             # Never let one failing reminder stop the loop
             try:
                 if now - reminder.next_run <= MISSED_GRACE_SECONDS:
-                    user = self.bot.get_user(reminder.user_id) or await self.bot.fetch_user(reminder.user_id)
-                    await user.send(reminder.text)
+                    await self.deliver(reminder)
                 else:
                     print(f"Skipped reminder {reminder.id}, it was missed by more than {MISSED_GRACE_SECONDS} seconds")
             except discord.Forbidden:
@@ -274,6 +358,29 @@ class PG_Reminders(commands.Cog):
             await self.bot.db.set_reminder_next_run(
                 reminder.id, compute_next_run(reminder.weekday, reminder.time_of_day, timezone, now)
             )
+
+    async def deliver(self, reminder: Reminder):
+        """Sends the reminder to its channel, or by DM. Falls back to a DM when the channel can't be used anymore."""
+        user = self.bot.get_user(reminder.user_id) or await self.bot.fetch_user(reminder.user_id)
+        if reminder.channel_id is None:
+            await user.send(reminder.text)
+            return
+
+        problem = "the channel no longer exists or the bot can't see it"
+        channel = await self.resolve_channel(reminder.channel_id)
+        if channel is not None:
+            # Re-check at send time, permissions may have changed since the reminder was set
+            member = await self.get_member(channel.guild, reminder.user_id)
+            problem = "you are no longer in that server" if member is None else check_can_post(channel, member)
+            if problem is None:
+                try:
+                    await channel.send(f"{user.mention} {reminder.text}", allowed_mentions=REMINDER_MENTIONS)
+                    return
+                except discord.HTTPException as e:
+                    problem = f"sending failed ({e.status})"
+
+        print(f"Reminder {reminder.id} could not be posted in channel {reminder.channel_id}: {problem}, sending as DM")
+        await user.send(f"Couldn't post your reminder in <#{reminder.channel_id}> ({problem}), here it is:\n{reminder.text}")
 
     @send_due_reminders.before_loop
     async def before_send_due_reminders(self):

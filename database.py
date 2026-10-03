@@ -2,6 +2,8 @@ import aiosqlite
 import time
 from dataclasses import dataclass
 
+from migrations import run_migrations
+
 CONFIG_VALUE_DEFAULTS = {
     "WELCOME_CHANNEL": None,
     "NEW_MEMBER_ROLE_ID": None,
@@ -21,6 +23,7 @@ class Reminder:
     time_of_day: str    # 'HH:MM' in the user's timezone
     text: str
     next_run: float     # unix timestamp
+    channel_id: int | None = None  # None = send as DM
 
 class PG_database():
     """
@@ -28,6 +31,8 @@ class PG_database():
     """
 
     DB_NAME = "prog_goats_data.db"
+    # Baseline schema: do NOT edit these statements.
+    # Every schema change is added as a new Migration in 'migrations.py', so existing and fresh databases end up identical.
     SQL_CREATE_TABLES = [
         """
         CREATE TABLE IF NOT EXISTS config_values(
@@ -62,7 +67,7 @@ class PG_database():
         );
         """,
         ]
-    SQL_REMINDER_COLUMNS = "id, user_id, weekday, time_of_day, text, next_run"
+    SQL_REMINDER_COLUMNS = "id, user_id, weekday, time_of_day, text, next_run, channel_id"
     SQL_ALL_CONFIG_VALUES = """
         SELECT key, value FROM config_values
         """
@@ -164,15 +169,15 @@ class PG_database():
     # Reminders
     # Reminder queries coming from a user are always filtered on user_id, so nobody can touch another user's reminder
 
-    async def add_reminder(self, user_id: int, weekday: int, time_of_day: str, text: str, next_run: float) -> int | None:
+    async def add_reminder(self, user_id: int, weekday: int, time_of_day: str, text: str, next_run: float, channel_id: int | None = None) -> int | None:
 
         if not isinstance(self.conn, aiosqlite.Connection):
             print("Not connected to database")
             return None
 
         cursor = await self.conn.execute(
-            "INSERT INTO reminders (user_id, weekday, time_of_day, text, next_run) VALUES (?, ?, ?, ?, ?)",
-            (user_id, weekday, time_of_day, text, next_run)
+            "INSERT INTO reminders (user_id, weekday, time_of_day, text, next_run, channel_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, weekday, time_of_day, text, next_run, channel_id)
         )
         await self.conn.commit()
         return cursor.lastrowid
@@ -202,15 +207,15 @@ class PG_database():
             row = await cursor.fetchone()
         return Reminder(*row) if row else None
 
-    async def update_reminder(self, user_id: int, reminder_id: int, weekday: int, time_of_day: str, text: str, next_run: float):
+    async def update_reminder(self, user_id: int, reminder_id: int, weekday: int, time_of_day: str, text: str, next_run: float, channel_id: int | None):
 
         if not isinstance(self.conn, aiosqlite.Connection):
             print("Not connected to database")
             return
 
         await self.conn.execute(
-            "UPDATE reminders SET weekday = ?, time_of_day = ?, text = ?, next_run = ? WHERE user_id = ? AND id = ?",
-            (weekday, time_of_day, text, next_run, user_id, reminder_id)
+            "UPDATE reminders SET weekday = ?, time_of_day = ?, text = ?, next_run = ?, channel_id = ? WHERE user_id = ? AND id = ?",
+            (weekday, time_of_day, text, next_run, channel_id, user_id, reminder_id)
         )
         await self.conn.commit()
 
@@ -279,6 +284,7 @@ class PG_database():
         for sql in self.SQL_CREATE_TABLES:
             await self.conn.execute(sql)
         await self.conn.commit()
+        await run_migrations(self.conn)
         await self._load_config_cache()
 
     async def close(self):
