@@ -6,6 +6,9 @@ CONFIG_VALUE_DEFAULTS = {
     "NEW_MEMBER_ROLE_ID": None,
     "NEW_MEMBER_ROLE_DURATION": str(7 * 24 * 60 * 60),
     "GUILD_ID": str(708749383918944349),
+    "SOTW_SUGGESTION_THREAD": None,
+    "QOTW_SUGGESTION_THREAD": None,
+    "SUGGESTION_COOLDOWN": str(60 * 60),
 }
 
 class PG_database():

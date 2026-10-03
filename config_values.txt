@@ -1,7 +1,10 @@
 Initial value set via interface commands in server:
 WELCOME_CHANNEL # call /set-welcome-channel in desired channel
 NEW_MEMBER_ROLE_ID # copy role id and pass as argument
+SOTW_SUGGESTION_THREAD # call /config set-suggestion-thread kind:sotw inside the desired thread
+QOTW_SUGGESTION_THREAD # call /config set-suggestion-thread kind:qotw inside the desired thread
 
 Initial Value set by default:
 NEW_MEMBER_ROLE_DURATION = 7 * 24 * 60 * 60 # 1 week in seconds
 GUILD_ID = 708749383918944349
+SUGGESTION_COOLDOWN = 60 * 60 # 1 hour in seconds, per user per suggestion type (/config set-suggestion-cooldown)

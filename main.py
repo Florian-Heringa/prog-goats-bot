@@ -18,6 +18,7 @@ class PG_Bot(discord.Bot):
         'listening_party',
         'tasks',
         'admin',
+        'suggestions',
     ]
 
     def __init__(self, *args, **kwargs):

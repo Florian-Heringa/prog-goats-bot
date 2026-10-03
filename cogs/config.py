@@ -61,6 +61,24 @@ class PG_Config(commands.Cog):
         await self.bot.db.set_config_value("NEW_MEMBER_ROLE_DURATION", str(timeout))
         await ctx.respond(f"Timeout for new member role set to {self.bot.db.get_config_value("NEW_MEMBER_ROLE_DURATION")} seconds.", ephemeral=True)
 
+    @config.command(name="set-suggestion-thread")
+    @discord.option("kind", type=str, choices=["sotw", "qotw"])
+    @commands.is_owner()
+    async def set_suggestion_thread(self, ctx: discord.ApplicationContext, kind: str):
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond("Run this command inside the thread suggestions should be posted to.", ephemeral=True)
+            return
+
+        await self.bot.db.set_config_value(f"{kind.upper()}_SUGGESTION_THREAD", str(ctx.channel.id))
+        await ctx.respond(f"{kind.upper()} suggestions will now be posted in {ctx.channel.mention}", ephemeral=True)
+
+    @config.command(name="set-suggestion-cooldown")
+    @discord.option("cooldown", type=int)
+    @commands.is_owner()
+    async def set_suggestion_cooldown(self, ctx: discord.ApplicationContext, cooldown: int):
+        await self.bot.db.set_config_value("SUGGESTION_COOLDOWN", str(cooldown))
+        await ctx.respond(f"Suggestion cooldown set to {self.bot.db.get_config_value("SUGGESTION_COOLDOWN")} seconds.", ephemeral=True)
+
 def setup(bot):
     bot.add_cog(PG_Config(bot))
     print("Added cog: 'PG_Config'")
