@@ -19,6 +19,7 @@ class PG_Bot(discord.Bot):
         'tasks',
         'admin',
         'suggestions',
+        'reminders',
     ]
 
     def __init__(self, *args, **kwargs):

@@ -1,5 +1,6 @@
 import aiosqlite
 import time
+from dataclasses import dataclass
 
 CONFIG_VALUE_DEFAULTS = {
     "WELCOME_CHANNEL": None,
@@ -11,6 +12,15 @@ CONFIG_VALUE_DEFAULTS = {
     "SUGGESTION_COOLDOWN": str(60 * 60),
     "ADMIN_ROLE_IDS": "",
 }
+
+@dataclass
+class Reminder:
+    id: int
+    user_id: int
+    weekday: int        # 0 = monday
+    time_of_day: str    # 'HH:MM' in the user's timezone
+    text: str
+    next_run: float     # unix timestamp
 
 class PG_database():
     """
@@ -35,7 +45,24 @@ class PG_database():
             PRIMARY KEY (user_id, role_id)
         );
         """,
+        """
+        CREATE TABLE IF NOT EXISTS reminders(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            weekday INTEGER NOT NULL,
+            time_of_day TEXT NOT NULL,
+            text TEXT NOT NULL,
+            next_run REAL NOT NULL
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_settings(
+            user_id INTEGER PRIMARY KEY,
+            timezone TEXT
+        );
+        """,
         ]
+    SQL_REMINDER_COLUMNS = "id, user_id, weekday, time_of_day, text, next_run"
     SQL_ALL_CONFIG_VALUES = """
         SELECT key, value FROM config_values
         """
@@ -132,6 +159,117 @@ class PG_database():
             (time.time(), )
         ) as cursor:
             return await cursor.fetchall()
+
+    #===================================================================================
+    # Reminders
+    # Reminder queries coming from a user are always filtered on user_id, so nobody can touch another user's reminder
+
+    async def add_reminder(self, user_id: int, weekday: int, time_of_day: str, text: str, next_run: float) -> int | None:
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return None
+
+        cursor = await self.conn.execute(
+            "INSERT INTO reminders (user_id, weekday, time_of_day, text, next_run) VALUES (?, ?, ?, ?, ?)",
+            (user_id, weekday, time_of_day, text, next_run)
+        )
+        await self.conn.commit()
+        return cursor.lastrowid
+
+    async def get_user_reminders(self, user_id: int) -> list[Reminder]:
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return []
+
+        async with self.conn.execute(
+            f"SELECT {self.SQL_REMINDER_COLUMNS} FROM reminders WHERE user_id = ? ORDER BY weekday, time_of_day",
+            (user_id, )
+        ) as cursor:
+            return [Reminder(*row) for row in await cursor.fetchall()]
+
+    async def get_reminder(self, user_id: int, reminder_id: int) -> Reminder | None:
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return None
+
+        async with self.conn.execute(
+            f"SELECT {self.SQL_REMINDER_COLUMNS} FROM reminders WHERE user_id = ? AND id = ?",
+            (user_id, reminder_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return Reminder(*row) if row else None
+
+    async def update_reminder(self, user_id: int, reminder_id: int, weekday: int, time_of_day: str, text: str, next_run: float):
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return
+
+        await self.conn.execute(
+            "UPDATE reminders SET weekday = ?, time_of_day = ?, text = ?, next_run = ? WHERE user_id = ? AND id = ?",
+            (weekday, time_of_day, text, next_run, user_id, reminder_id)
+        )
+        await self.conn.commit()
+
+    async def delete_reminder(self, user_id: int, reminder_id: int):
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return
+
+        await self.conn.execute("DELETE FROM reminders WHERE user_id = ? AND id = ?", (user_id, reminder_id))
+        await self.conn.commit()
+
+    async def get_due_reminders(self, now: float) -> list[Reminder]:
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return []
+
+        async with self.conn.execute(
+            f"SELECT {self.SQL_REMINDER_COLUMNS} FROM reminders WHERE next_run <= ?",
+            (now, )
+        ) as cursor:
+            return [Reminder(*row) for row in await cursor.fetchall()]
+
+    async def set_reminder_next_run(self, reminder_id: int, next_run: float):
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return
+
+        await self.conn.execute("UPDATE reminders SET next_run = ? WHERE id = ?", (next_run, reminder_id))
+        await self.conn.commit()
+
+    #===================================================================================
+    # User settings
+
+    async def get_user_timezone(self, user_id: int) -> str | None:
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return None
+
+        async with self.conn.execute("SELECT timezone FROM user_settings WHERE user_id = ?", (user_id, )) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def set_user_timezone(self, user_id: int, timezone: str):
+
+        if not isinstance(self.conn, aiosqlite.Connection):
+            print("Not connected to database")
+            return
+
+        await self.conn.execute(
+            """INSERT INTO user_settings (user_id, timezone) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET timezone = excluded.timezone
+            """,
+            (user_id, timezone)
+        )
+        await self.conn.commit()
 
     #===================================================================================
     # Context management
