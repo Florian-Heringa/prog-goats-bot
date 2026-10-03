@@ -17,7 +17,12 @@ class PG_Testing(commands.Cog):
     def __init__(self, bot: "PG_Bot"):
         self.bot: "PG_Bot" = bot
 
-    testing = discord.SlashCommandGroup("testing", "Commands for testing proper behavior of the bot.")
+    # Hidden from non-administrators, narrow down to the owner in Server Settings -> Integrations
+    testing = discord.SlashCommandGroup(
+        "testing",
+        "Commands for testing proper behavior of the bot.",
+        default_member_permissions=discord.Permissions(administrator=True),
+    )
 
     @testing.command(name = "debug-join")
     @commands.is_owner()

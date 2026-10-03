@@ -3,6 +3,11 @@ WELCOME_CHANNEL # call /set-welcome-channel in desired channel
 NEW_MEMBER_ROLE_ID # copy role id and pass as argument
 SOTW_SUGGESTION_THREAD # call /config set-suggestion-thread kind:sotw inside the desired thread
 QOTW_SUGGESTION_THREAD # call /config set-suggestion-thread kind:qotw inside the desired thread
+ADMIN_ROLE_IDS # comma separated role ids, managed with /config add-admin-role, remove-admin-role and list-admin-roles
+
+Command visibility (one-time setup in Server Settings -> Integrations -> bot -> Manage):
+/config # hidden from members without 'Manage Server' by default; allow the admin roles here
+/testing, /hello # hidden from non-administrators by default; deny @everyone/admin roles and allow only the owner here
 
 Initial Value set by default:
 NEW_MEMBER_ROLE_DURATION = 7 * 24 * 60 * 60 # 1 week in seconds

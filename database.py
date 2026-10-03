@@ -9,6 +9,7 @@ CONFIG_VALUE_DEFAULTS = {
     "SOTW_SUGGESTION_THREAD": None,
     "QOTW_SUGGESTION_THREAD": None,
     "SUGGESTION_COOLDOWN": str(60 * 60),
+    "ADMIN_ROLE_IDS": "",
 }
 
 class PG_database():

@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 
+import traceback
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..main import PG_Bot
@@ -28,8 +30,18 @@ class PG_Base(commands.Cog):
             # TODO: Add error logging
             print(f"Welcome channel not found for {guild.name}")
 
+    @commands.Cog.listener()
+    async def on_application_command_error(self, ctx: discord.ApplicationContext, error: discord.DiscordException):
+        if isinstance(error, commands.CheckFailure):
+            await ctx.respond("You don't have permission to use this command.", ephemeral=True)
+            return
+
+        # Registering this listener disables py-cord's default handler, so print the traceback ourselves
+        traceback.print_exception(type(error), error, error.__traceback__)
+
     # TEST COMMAND
     @discord.slash_command(name="hello", description="Say hello to the bot")
+    @discord.default_permissions(administrator=True)
     @commands.is_owner()
     async def hello(self, ctx: discord.ApplicationContext):
         await ctx.respond("Hey, a variation!")
